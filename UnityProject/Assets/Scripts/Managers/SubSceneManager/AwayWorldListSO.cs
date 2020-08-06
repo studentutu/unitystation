@@ -12,8 +12,10 @@ public class AwayWorldListSO : ScriptableObject
 	         "the build settings list",EInfoBoxType.Normal)]
 	public List<string> AwayWorlds = new List<string>();
 
+	public bool DontSpawnAny;
 	public string GetRandomAwaySite()
 	{
+		if (DontSpawnAny) return "";
 		return AwayWorlds[Random.Range(0, AwayWorlds.Count)];
 	}
 }

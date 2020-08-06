@@ -24,9 +24,9 @@ public partial class SubSceneManager
 		//Choose and load a mainstation
 		yield return StartCoroutine(ServerLoadMainStation(loadTimer));
 		//Load Asteroids:
-		yield return StartCoroutine(ServerLoadAsteroids(loadTimer));
-		//Load away site:
-		yield return StartCoroutine(ServerLoadAwaySite(loadTimer));
+		// yield return StartCoroutine(ServerLoadAsteroids(loadTimer));
+		// //Load away site:
+		// yield return StartCoroutine(ServerLoadAwaySite(loadTimer));
 
 		netIdentity.isDirty = true;
 
@@ -41,15 +41,15 @@ public partial class SubSceneManager
 	{
 		MainStationLoaded = true;
 		//Auto scene load stuff in editor:
-		var prevEditorScene = GetEditorPrevScene();
-		if (mainStationList.MainStations.Contains(prevEditorScene))
-		{
-			serverChosenMainStation = prevEditorScene;
-		}
-		else
-		{
-			serverChosenMainStation = mainStationList.GetRandomMainStation();
-		}
+		// var prevEditorScene = GetEditorPrevScene();
+		// if (mainStationList.MainStations.Contains(prevEditorScene))
+		// {
+			serverChosenMainStation = "PogStation";
+		// }
+		// else
+		// {
+		// 	serverChosenMainStation = mainStationList.GetRandomMainStation();
+		// }
 		loadTimer.IncrementLoadBar($"Loading {serverChosenMainStation}");
 		//load main station
 		yield return StartCoroutine(LoadSubScene(serverChosenMainStation, loadTimer));
@@ -64,6 +64,7 @@ public partial class SubSceneManager
 	IEnumerator ServerLoadAsteroids(SubsceneLoadTimer loadTimer)
 	{
 		loadTimer.IncrementLoadBar("Loading Asteroids");
+		if (asteroidList.DontSpawnAny) yield break;
 		foreach (var asteroid in asteroidList.Asteroids)
 		{
 			yield return StartCoroutine(LoadSubScene(asteroid, loadTimer));
@@ -88,6 +89,7 @@ public partial class SubSceneManager
 		else
 		{
 			serverChosenAwaySite = awayWorldList.GetRandomAwaySite();
+			if (string.IsNullOrEmpty(serverChosenAwaySite)) yield break;
 		}
 		loadTimer.IncrementLoadBar("Loading Away Site");
 		yield return StartCoroutine(LoadSubScene(serverChosenAwaySite, loadTimer));

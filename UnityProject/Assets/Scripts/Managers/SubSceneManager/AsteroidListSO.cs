@@ -11,4 +11,6 @@ public class AsteroidListSO : ScriptableObject
 	         "spawned at runtime. Remember to also add your scene to " +
 	         "the build settings list",EInfoBoxType.Normal)]
 	public List<string> Asteroids = new List<string>();
+
+	public bool DontSpawnAny;
 }

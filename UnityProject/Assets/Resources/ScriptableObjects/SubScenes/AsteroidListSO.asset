@@ -19,3 +19,4 @@ MonoBehaviour:
   - Asteroid04
   - Asteroid05
   - Asteroid06
+  DontSpawnAny: 1
