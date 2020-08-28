@@ -44,8 +44,6 @@ public class ReactorGraphiteChamber : MonoBehaviour, IInteractable<HandApply>, I
 	public ReactorPipe ReactorPipe;
 
 	private float WaterEnergyDensityPer1 = 10f;
-	private float RodDensityPer1 = 7.5f;
-
 
 	public ReactorChamberRod[] ReactorRods = new ReactorChamberRod[16];
 	public List<FuelRod> ReactorFuelRods = new List<FuelRod>();
