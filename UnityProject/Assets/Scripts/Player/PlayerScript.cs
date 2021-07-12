@@ -1,3 +1,4 @@
+using System.Text;
 using Systems.Ai;
 using UnityEngine;
 using Mirror;
@@ -73,7 +74,7 @@ public class PlayerScript : NetworkBehaviour, IMatrixRotation, IAdminInfo, IActi
 	/// <summary>
 	/// This player's item storage.
 	/// </summary>
-	public DynamicItemStorage ItemStorage { get; private set; }
+	public DynamicItemStorage DynamicItemStorage { get; private set; }
 
 	private static bool verified;
 	private static ulong SteamID;
@@ -115,6 +116,7 @@ public class PlayerScript : NetworkBehaviour, IMatrixRotation, IAdminInfo, IActi
 	//The object the player will receive chat and send chat from.
 	//E.g. usually same object as this script but for Ai it will be their core object
 	//Serverside only
+	[SerializeField]
 	private GameObject playerChatLocation = null;
 	public GameObject PlayerChatLocation => playerChatLocation;
 
@@ -132,7 +134,7 @@ public class PlayerScript : NetworkBehaviour, IMatrixRotation, IAdminInfo, IActi
 		chatIcon = GetComponentInChildren<ChatIcon>(true);
 		playerMove = GetComponent<PlayerMove>();
 		playerDirectional = GetComponent<Directional>();
-		ItemStorage = GetComponent<DynamicItemStorage>();
+		DynamicItemStorage = GetComponent<DynamicItemStorage>();
 		Equipment = GetComponent<Equipment>();
 		Cooldowns = GetComponent<HasCooldowns>();
 		PlayerOnlySyncValues = GetComponent<PlayerOnlySyncValues>();
@@ -162,9 +164,6 @@ public class PlayerScript : NetworkBehaviour, IMatrixRotation, IAdminInfo, IActi
 	// You know the drill
 	public override void OnStartServer()
 	{
-		//We default to this game object being the location for chat
-		SetPlayerChatLocation(gameObject);
-
 		Init();
 	}
 
@@ -203,7 +202,14 @@ public class PlayerScript : NetworkBehaviour, IMatrixRotation, IAdminInfo, IActi
 				UIManager.Instance.statsTab.window.SetActive(true);
 			}
 
-			PlayerManager.SetPlayerForControl(gameObject, PlayerSync);
+			IPlayerControllable input = PlayerSync;
+
+			if (TryGetComponent<AiMouseInputController>(out var aiMouseInputController))
+			{
+				input = aiMouseInputController;
+			}
+
+			PlayerManager.SetPlayerForControl(gameObject, input);
 
 			if (playerState == PlayerStates.Ghost)
 			{
@@ -451,30 +457,17 @@ public class PlayerScript : NetworkBehaviour, IMatrixRotation, IAdminInfo, IActi
 
 		//TODO: Checks if player can speak (is not gagged, unconcious, has no mouth)
 		ChatChannel transmitChannels = ChatChannel.OOC | ChatChannel.Local;
-		if (CustomNetworkManager.Instance._isServer)
+
+		var playerStorage = gameObject.GetComponent<DynamicItemStorage>();
+		if (playerStorage != null)
 		{
-			var playerStorage = gameObject.GetComponent<ItemStorage>();
-			if (playerStorage && !playerStorage.GetNamedItemSlot(NamedSlot.ear).IsEmpty)
+			foreach (var earSlot in playerStorage.GetNamedItemSlots(NamedSlot.ear))
 			{
-				Headset headset = playerStorage.GetNamedItemSlot(NamedSlot.ear)?.Item?.GetComponent<Headset>();
-				if (headset)
-				{
-					EncryptionKeyType key = headset.EncryptionKey;
-					transmitChannels = transmitChannels | EncryptionKey.Permissions[key];
-				}
-			}
-		}
-		else
-		{
-			GameObject earSlotItem = gameObject.GetComponent<ItemStorage>().GetNamedItemSlot(NamedSlot.ear).ItemObject;
-			if (earSlotItem)
-			{
-				Headset headset = earSlotItem.GetComponent<Headset>();
-				if (headset)
-				{
-					EncryptionKeyType key = headset.EncryptionKey;
-					transmitChannels = transmitChannels | EncryptionKey.Permissions[key];
-				}
+				if(earSlot.IsEmpty) continue;
+				if(earSlot.Item.TryGetComponent<Headset>(out var headset) == false) continue;
+
+				EncryptionKeyType key = headset.EncryptionKey;
+				transmitChannels = transmitChannels | EncryptionKey.Permissions[key];
 			}
 		}
 
@@ -542,18 +535,29 @@ public class PlayerScript : NetworkBehaviour, IMatrixRotation, IAdminInfo, IActi
 
 	public string AdminInfoString()
 	{
-		if (PlayerList.Instance.IsAntag(gameObject))
-		{
-			return $"<color=yellow>Name: {characterSettings.Name}\n" +
-				   $"Acc: {characterSettings.Username}\n" +
-				   $"Antag: True \n" +
-				   "Objectives : "+ mind.GetAntag().GetObjectiveSummary() + "</color>";
+		var stringBuilder = new StringBuilder();
 
+		stringBuilder.AppendLine($"Name: {characterSettings.Name}");
+		stringBuilder.AppendLine($"Acc: {characterSettings.Username}");
+
+		if(connectionToClient == null)
+		{
+			stringBuilder.AppendLine("Has No Soul");
 		}
 
-		return $"Name: {characterSettings.Name}\n" +
-			   $"Acc: {characterSettings.Username}\n" +
-			   $"Antag: False";
+		if (playerHealth != null)
+		{
+			stringBuilder.AppendLine($"Is Alive: {playerHealth.IsDead == false} Health: {playerHealth.OverallHealth}");
+		}
+
+		if (mind !=null && mind.IsAntag)
+		{
+			stringBuilder.Insert(0, "<color=yellow>");
+			stringBuilder.AppendLine($"Antag: {mind.GetAntag().Antagonist.AntagJobType}");
+			stringBuilder.AppendLine($"Objectives : {mind.GetAntag().GetObjectiveSummary()}</color>");
+		}
+
+		return stringBuilder.ToString();
 	}
 
 	public void CallActionClient()

@@ -157,7 +157,7 @@ namespace Antagonists
 		/// <param name="tcCount">The amount of telecrystals the uplink should be given.</param>
 		public static void TryInstallPDAUplink(ConnectedPlayer player, int tcCount, bool isNukeOps)
 		{
-			foreach (ItemSlot slot in player.Script.ItemStorage.GetItemSlotTree())
+			foreach (ItemSlot slot in player.Script.DynamicItemStorage.GetItemSlotTree())
 			{
 				if (slot.IsEmpty) continue;
 				if (slot.Item.TryGetComponent<Items.PDA.PDALogic>(out var pda))
@@ -199,9 +199,9 @@ namespace Antagonists
 		/// </summary>
 		public void ShowAntagStatusReport()
 		{
-			StringBuilder statusSB = new StringBuilder($"<color=white><size=60><b>End of Round Report</b></size></color>\n\n", 200);
+			StringBuilder statusSB = new StringBuilder();
 
-			var message = $"End of Round Report on {ServerData.ServerConfig.ServerName}\n";
+			var message = $"";
 
 			if (activeAntags.Count > 0)
 			{

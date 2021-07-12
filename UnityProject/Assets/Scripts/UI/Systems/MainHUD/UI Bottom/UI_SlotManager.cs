@@ -1,4 +1,5 @@
-﻿using System.Collections;
+﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using HealthV2;
@@ -24,6 +25,13 @@ public class UI_SlotManager : MonoBehaviour
 	public GameObject SlotPrefab;
 
 	public HandsController HandsController;
+
+	public void Start()
+	{
+		EventManager.AddHandler(Event.LoggedOut, RemoveAll);
+		EventManager.AddHandler(Event.PlayerSpawned, RemoveAll);
+		EventManager.AddHandler(Event.RoundEnded, RemoveAll);
+	}
 
 	public void AddContainer(IDynamicItemSlotS bodyPartUISlots)
 	{
@@ -93,12 +101,18 @@ public class UI_SlotManager : MonoBehaviour
 	{
 		if (BodyPartToSlot.ContainsKey(bodyPartUISlots) == false)
 			BodyPartToSlot[bodyPartUISlots] = new List<GameObject>();
-		var Slot = bodyPartUISlots.RelatedStorage.GetNamedItemSlot(StorageCharacteristics.namedSlot);
+		var namedItemSlot = bodyPartUISlots.RelatedStorage.GetNamedItemSlot(StorageCharacteristics.namedSlot);
 		for (int i = 0; i < BodyPartToSlot[bodyPartUISlots].Count; i++)
 		{
-			var slot = BodyPartToSlot[bodyPartUISlots][i].GetComponentInChildren<UI_DynamicItemSlot>();
+			var slot = BodyPartToSlot[bodyPartUISlots][i].OrNull()?.GetComponentInChildren<UI_DynamicItemSlot>();
 
-			if (slot.ItemSlot == Slot)
+			if (slot == null)
+			{
+				Logger.LogError($"{bodyPartUISlots.RelatedStorage.OrNull()?.gameObject.ExpensiveName()} has null UI_DynamicItemSlot, slot: {StorageCharacteristics.namedSlot}");
+				continue;
+			}
+
+			if (slot.ItemSlot == namedItemSlot)
 			{
 				OpenSlots.Remove(BodyPartToSlot[bodyPartUISlots][i].GetComponentInChildren<UI_DynamicItemSlot>());
 				BodyPartToSlot[bodyPartUISlots][i].GetComponentInChildren<UI_DynamicItemSlot>().ReSetSlot();
@@ -122,6 +136,7 @@ public class UI_SlotManager : MonoBehaviour
 
 	public void RemoveAll()
 	{
+		if (this == null) return;
 		foreach (var Inslots in BodyPartToSlot.Keys.ToArray())
 		{
 			foreach (var Characteristics in Inslots.Storage)

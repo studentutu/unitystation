@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using HealthV2;
 using UnityEngine;
+using NaughtyAttributes;
 using Items;
  using Messages.Server.HealthMessages;
 
@@ -18,9 +19,13 @@ public class HealsTheLiving : MonoBehaviour, ICheckedInteractable<HandApply>
 	public DamageType healType;
 
 	public bool StopsExternalBleeding = false;
-	public bool HealsSlashDamage = false;
+	public bool HealsTraumaDamage = false;
 
-	[Range(0,100)] public float SlashDamageToHeal = 20;
+	[Range(0,100), EnableIf("HealsTraumaDamage")]
+	public float TraumaDamageToHeal = 20;
+
+	[SerializeField, EnableIf("HealsTraumaDamage")]
+	protected BodyPart.TramuticDamageTypes TraumaTypeToHeal;
 
 	protected Stackable stackable;
 
@@ -70,7 +75,14 @@ public class HealsTheLiving : MonoBehaviour, ICheckedInteractable<HandApply>
 	private void ServerApplyHeal(LivingHealthMasterBase targetBodyPart, HandApply interaction)
 	{
 		targetBodyPart.HealDamage(null, 40, healType, interaction.TargetBodyPart);
-		RemoveLimbLossBleed(targetBodyPart, interaction);
+		if (StopsExternalBleeding)
+		{
+			RemoveLimbLossBleed(targetBodyPart, interaction);
+		}
+		if (HealsTraumaDamage)
+		{
+			HealTraumaDamage(targetBodyPart, interaction);
+		}
 		stackable.ServerConsume(1);
 	}
 
@@ -83,6 +95,17 @@ public class HealsTheLiving : MonoBehaviour, ICheckedInteractable<HandApply>
 
 		StandardProgressAction.Create(ProgressConfig, ProgressComplete)
 			.ServerStartProgress(originator.RegisterTile(), 5f, originator);
+	}
+
+	protected void HealTraumaDamage(LivingHealthMasterBase livingHealthMasterBase, HandApply interaction)
+	{
+		if (livingHealthMasterBase.HasTraumaDamage(interaction.TargetBodyPart))
+		{
+			livingHealthMasterBase.HealTraumaDamage(TraumaDamageToHeal, interaction.TargetBodyPart, TraumaTypeToHeal);
+			Chat.AddActionMsgToChat(interaction,
+			$"You apply the {gameObject.ExpensiveName()} to {livingHealthMasterBase.PlayerScriptOwner.visibleName}",
+			$"{interaction.Performer.ExpensiveName()} applies {name} to {livingHealthMasterBase.PlayerScriptOwner.visibleName}.");
+		}
 	}
 
 	protected bool CheckForBleedingBodyContainers(LivingHealthMasterBase targetBodyPart, HandApply interaction)

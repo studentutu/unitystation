@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Text;
 using Items;
 using Items.Cargo.Wrapping;
 using Objects;
+using Objects.Atmospherics;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.SceneManagement;
@@ -38,6 +40,8 @@ namespace Systems.Cargo
 		private float shuttleFlyDuration = 10f;
 
 		private Dictionary<string, ExportedItem> exportedItems = new Dictionary<string, ExportedItem>();
+
+		public Dictionary<ItemTrait, int> SoldHistory = new Dictionary<ItemTrait, int>();
 
 		private void Awake()
 		{
@@ -86,6 +90,7 @@ namespace Systems.Cargo
 			ActiveBounties.Clear();
 			CurrentOrders.Clear();
 			CurrentCart.Clear();
+			SoldHistory.Clear();
 			ShuttleStatus = ShuttleStatus.DockedStation;
 			Credits = 1000;
 			CurrentFlyTime = 0f;
@@ -329,13 +334,33 @@ namespace Systems.Cargo
 						Logger.LogError($"{itemAttributes.name} has null or empty item trait, please fix");
 						continue;
 					}
-
+					if(SoldHistory.ContainsKey(itemTrait) == false)
+					{
+						SoldHistory.Add(itemTrait, 0);
+					}
+					SoldHistory[itemTrait] += count;
 					count = TryCompleteBounty(itemTrait, count);
 					if (count == 0)
 					{
 						break;
 					}
 				}
+			}
+
+			//Add value of mole inside gas container
+			var gasContainer = item.GetComponent<GasContainer>();
+			if (gasContainer)
+			{
+				var stringBuilder = new StringBuilder();
+				stringBuilder.Append(export.ExportMessage);
+
+				foreach (var gas in gasContainer.GasMix.GasesArray)
+				{
+					stringBuilder.AppendLine($"Exported {gas.Moles} moles of {gas.GasSO.Name} for {(int)gas.Moles * gas.GasSO.ExportPrice} credits");
+					export.TotalValue += (int)gas.Moles * gas.GasSO.ExportPrice;
+				}
+
+				export.ExportMessage = stringBuilder.ToString();
 			}
 
 			var playerScript = item.GetComponent<PlayerScript>();

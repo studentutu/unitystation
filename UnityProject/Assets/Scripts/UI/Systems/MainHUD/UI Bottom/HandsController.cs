@@ -13,7 +13,7 @@ public class HandsController : MonoBehaviour
 
 	public DoubleHandController DoubleHandController;
 
-	public List<DoubleHandController> DoubleHandControllers = new List<DoubleHandController>();
+	public HashSet<DoubleHandController> DoubleHandControllers = new HashSet<DoubleHandController>();
 
 	public List<DoubleHandController> AvailableLeftHand = new List<DoubleHandController>();
 
@@ -94,10 +94,19 @@ public class HandsController : MonoBehaviour
 
 	public void RemoveAllHands()
 	{
-		foreach (var HandStorage in StorageToHands.Keys.ToArray())
+		foreach (var HandStorage in DoubleHandControllers.ToArray())
 		{
-			RemoveHand(HandStorage);
+			Destroy(HandStorage.gameObject);
+
 		}
+		StorageToHands.Clear();
+		AvailableLeftHand.Clear();
+		AvailableRightHand.Clear();
+		DoubleHandControllers.Clear();
+		activeDoubleHandController = null;
+		PlayerManager.LocalPlayerScript.playerNetworkActions.CmdSetActiveHand(0, NamedSlot.none);
+		PlayerManager.LocalPlayerScript.playerNetworkActions.activeHand = null;
+		PlayerManager.LocalPlayerScript.playerNetworkActions.CurrentActiveHand = NamedSlot.none;
 	}
 
 	public void RemoveHand(
@@ -128,7 +137,11 @@ public class HandsController : MonoBehaviour
 			{
 				if (DoubleHandControllers.Count > 0)
 				{
-					DoubleHandControllers[0].PickActiveHand();
+					foreach (var DHC in DoubleHandControllers)
+					{
+						DHC.PickActiveHand();
+						break;
+					}
 				}
 				else
 				{
@@ -197,7 +210,7 @@ public class HandsController : MonoBehaviour
 			return;
 		}
 
-		var CurrentSlot = PlayerManager.LocalPlayerScript.ItemStorage.GetActiveHandSlot();
+		var CurrentSlot = PlayerManager.LocalPlayerScript.DynamicItemStorage.GetActiveHandSlot();
 		// Is there an item in the active hand?
 		if (CurrentSlot.Item == null)
 		{
@@ -219,7 +232,7 @@ public class HandsController : MonoBehaviour
 		}
 
 		// Is there an item to equip?
-		var CurrentSlot = PlayerManager.LocalPlayerScript.ItemStorage.GetActiveHandSlot();
+		var CurrentSlot = PlayerManager.LocalPlayerScript.DynamicItemStorage.GetActiveHandSlot();
 		if (CurrentSlot.Item == null)
 		{
 			return;
@@ -228,7 +241,7 @@ public class HandsController : MonoBehaviour
 		//This checks which UI slot the item can be equiped to and swaps it there
 		//Try to equip the item into the appropriate slot
 		var bestSlot =
-			BestSlotForTrait.Instance.GetBestSlot(CurrentSlot.Item, PlayerManager.LocalPlayerScript.ItemStorage);
+			BestSlotForTrait.Instance.GetBestSlot(CurrentSlot.Item, PlayerManager.LocalPlayerScript.DynamicItemStorage);
 		if (bestSlot == null)
 		{
 			Chat.AddExamineMsg(PlayerManager.LocalPlayerScript.gameObject, "There is no available slot for that");
@@ -240,7 +253,7 @@ public class HandsController : MonoBehaviour
 
 	public static bool SwapItem(UI_ItemSlot itemSlot)
 	{
-		var CurrentSlot = PlayerManager.LocalPlayerScript.ItemStorage.GetActiveHandSlot();
+		var CurrentSlot = PlayerManager.LocalPlayerScript.DynamicItemStorage.GetActiveHandSlot();
 		if (isValidPlayer())
 		{
 			if (CurrentSlot != itemSlot.ItemSlot)

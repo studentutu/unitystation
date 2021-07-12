@@ -137,7 +137,7 @@ namespace UI.Core
 			}
 			else
 			{
-				playerSlot = PlayerManager.LocalPlayerScript.ItemStorage.GetActiveHandSlot();
+				playerSlot = PlayerManager.LocalPlayerScript.DynamicItemStorage.GetActiveHandSlot();
 			}
 			OtherPlayerSlotTransferMessage.Send(playerSlot, targetSlot, isGhost);
 		}
@@ -217,6 +217,7 @@ namespace UI.Core
 		/// </summary>
 		private void OnSlotContentsChangeClient()
 		{
+			gameObject.SetActive(true);
 			// need to wait one frame because item needs to refresh before updating UI
 			StartCoroutine(WaitOneFrameForUpdate());
 		}

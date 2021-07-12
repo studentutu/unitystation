@@ -11,7 +11,6 @@ using Mirror;
 using Objects;
 using Objects.Engineering;
 using Objects.Research;
-using TMPro;
 using UI.Systems.MainHUD.UI_Bottom;
 using UnityEngine;
 
@@ -19,6 +18,7 @@ namespace Systems.Ai
 {
 	/// <summary>
 	/// Main class controlling player job AI logic
+	/// This isn't the class which is on the AiCore or InteliCard that is AiVessel
 	/// Sync vars in this class only get sync'd to the object owner
 	/// </summary>
 	public class AiPlayer : NetworkBehaviour, IAdminInfo
@@ -63,6 +63,7 @@ namespace Systems.Ai
 		private UI_Ai aiUi;
 
 		private bool hasDied;
+		public bool HasDied => hasDied;
 
 		[SyncVar(hook = nameof(SyncPowerState))]
 		private bool hasPower;
@@ -96,6 +97,17 @@ namespace Systems.Ai
 
 		//Remove one integrity every 1 second
 		private const float purgeDamageInterval = 1f;
+
+		private bool tryingToRestorePower;
+		private Coroutine routine;
+
+		private bool isMalf = false;
+
+		public bool IsMalf
+		{
+			get => isMalf;
+			set => isMalf = value;
+		}
 
 		//TODO make into sync list, will need to be sync as it is used in some validations client and serverside
 		private List<string> openNetworks = new List<string>()
@@ -161,6 +173,16 @@ namespace Systems.Ai
 			isCarded = false;
 		}
 
+		public override void OnStartClient()
+		{
+			base.OnStartClient();
+
+			if(PlayerManager.LocalPlayerScript  == null ||
+			   PlayerManager.LocalPlayerScript.PlayerState != PlayerScript.PlayerStates.Ai) return;
+
+			SetSpriteVisibility(true);
+		}
+
 		private void AddVesselListeners()
 		{
 			var coreIntegrity = vesselObject.GetComponent<Integrity>();
@@ -206,13 +228,32 @@ namespace Systems.Ai
 			}
 		}
 
+		public override void OnStartLocalPlayer()
+		{
+			base.OnStartLocalPlayer();
+
+			Init();
+
+			SyncCore(vesselObject, vesselObject);
+			SyncPowerState(hasPower, hasPower);
+			CmdSetVisibilityToOtherAis();
+		}
+
 		#endregion
 
 		#region Sync Stuff
 
-		public override void OnStartLocalPlayer()
+		private void Init()
 		{
-			PlayerManager.SetMovementControllable(GetComponent<AiMouseInputController>());
+			if (aiUi == null)
+			{
+				aiUi = UIManager.Instance.displayControl.hudBottomAi.GetComponent<UI_Ai>();
+			}
+
+			if (lightingSystem == null)
+			{
+				lightingSystem = Camera.main.GetComponent<LightingSystem>();
+			}
 		}
 
 		/// <summary>
@@ -228,11 +269,9 @@ namespace Systems.Ai
 			//Something weird with headless and local host triggering the sync even though its set to owner
 			if (CustomNetworkManager.IsHeadless || PlayerManager.LocalPlayer != gameObject) return;
 
-			aiUi = UIManager.Instance.displayControl.hudBottomAi.GetComponent<UI_Ai>();
+			Init();
 			aiUi.OrNull()?.SetUp(this);
 			coreCamera = newCore.GetComponent<SecurityCamera>();
-
-			lightingSystem = Camera.main.GetComponent<LightingSystem>();
 
 			//Reset location to core
 			CmdTeleportToCore();
@@ -243,15 +282,8 @@ namespace Systems.Ai
 				ClientSetCameraLocation(newCore.transform);
 			}
 
-			//Enable security camera overlay if we are only a core
-			SetCameras(isCarded == false);
-
 			//Ask server to force sync laws
 			CmdAskForLawUpdate();
-
-			//Set sprite to player layer
-			//TODO currently other AIs cant see where each other is looking maybe try sync this to only AI's?
-			mainSprite.layer = 8;
 		}
 
 		[Client]
@@ -260,6 +292,8 @@ namespace Systems.Ai
 			hasPower = newState;
 
 			if (CustomNetworkManager.IsHeadless || PlayerManager.LocalPlayer != gameObject) return;
+
+			Init();
 
 			//If we lose power we cant see much
 			lightingSystem.fovDistance = newState ? 13 : 2;
@@ -273,6 +307,8 @@ namespace Systems.Ai
 
 			if (CustomNetworkManager.IsHeadless || PlayerManager.LocalPlayer != gameObject) return;
 
+			Init();
+
 			aiUi.SetPowerLevel(newValue);
 		}
 
@@ -282,6 +318,8 @@ namespace Systems.Ai
 			integrity = newValue;
 
 			if (CustomNetworkManager.IsHeadless || PlayerManager.LocalPlayer != gameObject) return;
+
+			Init();
 
 			aiUi.SetIntegrityLevel(newValue);
 		}
@@ -293,10 +331,7 @@ namespace Systems.Ai
 
 			if (CustomNetworkManager.IsHeadless || PlayerManager.LocalPlayer != gameObject) return;
 
-			if (aiUi == null)
-			{
-				aiUi = UIManager.Instance.displayControl.hudBottomAi.GetComponent<UI_Ai>();
-			}
+			Init();
 
 			aiUi.SetNumberOfCameras(newValue);
 		}
@@ -451,13 +486,22 @@ namespace Systems.Ai
 			ServerSetCameraLocation(vesselObject);
 		}
 
-		[TargetRpc]
-		private void TargetRpcTurnOffCameras(NetworkConnection conn)
+		private void ToggleCameras(bool newState)
 		{
-			SetCameras(false);
+			if(connectionToClient == null) return;
+			TargetRpcToggleCameras(connectionToClient, newState);
+			SetVisibilityToOtherAis(false);
+		}
 
-			//Reset sprite to ghost layer
-			mainSprite.layer = 31;
+		[TargetRpc]
+		//Sets the camera and Ai player sprites for this player
+		private void TargetRpcToggleCameras(NetworkConnection conn, bool newState)
+		{
+			//Set cameras
+			SetCameras(newState);
+
+			//Set our sprite state
+			SetSpriteVisibility(newState);
 		}
 
 		[Command]
@@ -696,6 +740,8 @@ namespace Systems.Ai
 				hasPower = true;
 			}
 
+			ToggleCameras(isCarded == false);
+
 			//Force camera to core/card
 			ServerSetCameraLocationVessel();
 
@@ -715,43 +761,6 @@ namespace Systems.Ai
 			info.Destroyed.OnWillDestroyServer.RemoveListener(OnCoreDestroy);
 
 			Death();
-		}
-
-		//Called when the core has lost power
-		[Server]
-		private void OnCorePowerLost(Tuple<PowerState, PowerState> oldAndNewStates)
-		{
-			if (oldAndNewStates.Item2 == PowerState.Off)
-			{
-				hasPower = false;
-
-				//Set serverside interaction distance validation
-				interactionDistance = 2;
-				Chat.AddExamineMsgFromServer(gameObject, "Core power has failed");
-
-				//Force move to core
-				ServerSetCameraLocation(vesselObject);
-
-				power = 0;
-				return;
-			}
-
-			hasPower = true;
-
-			//Reset distance validation value
-			interactionDistance = 29;
-
-			if (oldAndNewStates.Item2 == PowerState.LowVoltage && oldAndNewStates.Item1 == PowerState.Off)
-			{
-				Chat.AddExamineMsgFromServer(gameObject, "Your core power is failing");
-			}
-		}
-
-		[Server]
-		//Called when the connected apc does a power network update
-		private void OnPowerNetworkUpdate(APC apc)
-		{
-			power = Mathf.Clamp(apc.CalculateChargePercentage() * 100, 0, 100);
 		}
 
 		//Called when the core is damaged
@@ -824,11 +833,278 @@ namespace Systems.Ai
 					return rootPlayer.gameObject;
 				}
 
-				return cardPickupable.ItemSlot.GetRootStorage().gameObject;
+				return cardPickupable.ItemSlot.GetRootStorageOrPlayer().gameObject;
 			}
 
 			//Else we must be on the floor so return ourselves
 			return vesselObject;
+		}
+
+		#endregion
+
+		#region Power
+
+		//Called when the core has lost power
+		[Server]
+		private void OnCorePowerLost(Tuple<PowerState, PowerState> oldAndNewStates)
+		{
+			if (oldAndNewStates.Item2 == PowerState.Off)
+			{
+				hasPower = false;
+				allowRadio = false;
+
+				//Set serverside interaction distance validation
+				interactionDistance = 2;
+				Chat.AddExamineMsgFromServer(gameObject, "Core power has failed");
+
+				//Force move to core
+				ServerSetCameraLocation(vesselObject);
+
+				power = 0;
+
+				if (tryingToRestorePower == false)
+				{
+					tryingToRestorePower = true;
+					routine = StartCoroutine(TryRestartPower());
+				}
+
+				return;
+			}
+
+			hasPower = true;
+			allowRadio = true;
+
+			//Reset distance validation value
+			interactionDistance = 29;
+
+			if (oldAndNewStates.Item1 == PowerState.LowVoltage)
+			{
+				Chat.AddExamineMsgFromServer(gameObject, "Your core power is failing!");
+			}
+
+			if (oldAndNewStates.Item1 == PowerState.OverVoltage)
+			{
+				Chat.AddExamineMsgFromServer(gameObject, "Your core power voltage is too high!");
+			}
+		}
+
+		[Server]
+		//Called when the connected apc does a power network update
+		private void OnPowerNetworkUpdate(APC apc)
+		{
+			power = Mathf.Clamp(apc.CalculateChargePercentage() * 100, 0, 100);
+		}
+
+		private IEnumerator TryRestartPower()
+		{
+			SendChatMessage("Backup battery online. Scanners, camera, and radio interface offline. Beginning fault-detection.");
+			yield return WaitFor.Seconds(5);
+			PowerRestoreIntervalCheck();
+
+			SendChatMessage("Fault confirmed: missing external power. Shutting down main control system to save power.");
+			yield return WaitFor.Seconds(2);
+			PowerRestoreIntervalCheck();
+
+			SendChatMessage("Emergency control system online. Verifying connection to power network...");
+			yield return WaitFor.Seconds(5);
+			PowerRestoreIntervalCheck();
+
+			//Check to see if connected to APCPoweredDevice
+			var apc = vesselObject.OrNull()?.GetComponent<APCPoweredDevice>();
+			if (apc == null)
+			{
+				SendChatMessage("ERROR: Unable to verify! No power connection detected!");
+				StopRestore();
+
+				//Shouldn't need to yield break but just in case
+				yield break;
+			}
+
+			//Check to see if connected to APC
+			if (apc.RelatedAPC == null)
+			{
+				//No APC connection, try to find nearest
+				SendChatMessage("Unable to verify! No connection to APC detected!");
+				yield return WaitFor.Seconds(2);
+				PowerRestoreIntervalCheck();
+				yield return WaitFor.EndOfFrame;
+
+				SendChatMessage("APC connection protocols activated. Attempting to interface with nearest APC...");
+				yield return WaitFor.Seconds(5);
+				PowerRestoreIntervalCheck();
+				yield return WaitFor.EndOfFrame;
+
+				apc.ConnectToClosestApc();
+
+				yield return WaitFor.Seconds(1);
+
+				if (apc.RelatedAPC == null)
+				{
+					SendChatMessage("ERROR: Failed to interface! No APC's detected! Recovery operation ceasing!");
+					StopRestore();
+
+					//Shouldn't need to yield break but just in case
+					yield break;
+				}
+
+				//Found APC check power again
+				PowerRestoreIntervalCheck(true);
+				yield return WaitFor.EndOfFrame;
+			}
+
+			//We have an APC but still no power...
+			SendChatMessage("Connection to APC verified. Searching for fault in internal power network...");
+			yield return WaitFor.Seconds(5);
+			PowerRestoreIntervalCheck();
+			yield return WaitFor.EndOfFrame;
+
+			//TODO once APC can be shut off check here for that and to force reactivate if it was turned off
+			SendChatMessage("APC internal power network operational. Searching for fault in external power network...");
+			yield return WaitFor.Seconds(2);
+			PowerRestoreIntervalCheck();
+			yield return WaitFor.EndOfFrame;
+
+			//Check for APC again, might have been destroyed...
+			var apcSecondCheck = vesselObject.OrNull()?.GetComponent<APCPoweredDevice>();
+			if (apcSecondCheck == null || apcSecondCheck.RelatedAPC == null)
+			{
+				SendChatMessage("ERROR: Connection to APC has failed whilst trying to find fault!");
+				StopRestore();
+
+				//Shouldn't need to yield break but just in case
+				yield break;
+			}
+
+			//Check for department battery
+			var batteries = apcSecondCheck.RelatedAPC.DepartmentBatteries.Where(x => x != null).ToArray();
+			if (batteries.Length == 0)
+			{
+				SendChatMessage("ERROR: Unable to locate external power network department battery! Physical fault cannot be fixed!");
+				StopRestore();
+
+				//Shouldn't need to yield break but just in case
+				yield break;
+			}
+
+			SendChatMessage("APC external power network operational. Searching for fault in external power network provider...");
+			yield return WaitFor.Seconds(2);
+			PowerRestoreIntervalCheck();
+			yield return WaitFor.EndOfFrame;
+
+			for (int i = 0; i < batteries.Length; i++)
+			{
+				var battery = batteries[i];
+				if(battery == null) continue;
+				SendChatMessage("Operational department battery found.");
+				yield return WaitFor.Seconds(1);
+				PowerRestoreIntervalCheck();
+				yield return WaitFor.EndOfFrame;
+
+				if (battery == null)
+				{
+					SendChatMessage("ERROR: Lost Connection to department battery!");
+
+					//Only stop checking if this is the last battery
+					if(i != batteries.Length - 1) continue;
+
+					SendChatMessage("ERROR: All external power providers have been checked. Recovery operation ceasing!");
+					StopRestore();
+
+					//Shouldn't need to yield break but just in case
+					yield break;
+				}
+
+				if (battery.CurrentState == BatteryStateSprite.Empty)
+				{
+					SendChatMessage("Fault Found: Department battery power is at 0%. Unable to fix fault.");
+
+					//Only stop checking if this is the last battery
+					if(i != batteries.Length - 1) continue;
+
+					SendChatMessage("ERROR: All external power providers have been checked. Recovery operation ceasing!");
+					StopRestore();
+
+					//Shouldn't need to yield break but just in case
+					yield break;
+				}
+
+				//Battery is not empty so see if it is off
+				if (battery.isOn == false)
+				{
+					SendChatMessage("Fault Found: Department battery power supply is turned off! Loading control program into power port software.");
+					yield return WaitFor.Seconds(1);
+					PowerRestoreIntervalCheck();
+					yield return WaitFor.EndOfFrame;
+
+					SendChatMessage("Transfer complete. Forcing battery to execute program.");
+					yield return WaitFor.Seconds(5);
+					PowerRestoreIntervalCheck();
+					yield return WaitFor.EndOfFrame;
+
+					SendChatMessage("Receiving control information from battery.");
+					yield return WaitFor.Seconds(1);
+					PowerRestoreIntervalCheck();
+					yield return WaitFor.EndOfFrame;
+
+					if (battery == null)
+					{
+						SendChatMessage("ERROR: Lost Connection to department battery!");
+
+						//Only stop checking if this is the last battery
+						if(i != batteries.Length - 1) continue;
+
+						SendChatMessage("ERROR: All external power providers have been checked. Recovery operation ceasing!");
+						StopRestore();
+
+						//Shouldn't need to yield break but just in case
+						yield break;
+					}
+
+					SendChatMessage("Assuming direct control. Forcing power supply on!");
+
+					//Force turn on the supply
+					battery.isOn = true;
+					battery.UpdateServerState();
+					break;
+				}
+			}
+
+			//Power back online!
+			tryingToRestorePower = false;
+		}
+
+		private void PowerRestoreIntervalCheck(bool weRestoredPower = false)
+		{
+			//Check to see if we have died or carded during routine...
+			if (hasDied || isCarded)
+			{
+				if (isCarded)
+				{
+					SendChatMessage("InteliCard Power Online. Alert cancelled. Power has been restored.");
+				}
+
+				StopRestore();
+				return;
+			}
+
+			//If we still dont have power continue
+			if(hasPower == false) return;
+
+			SendChatMessage(weRestoredPower ? "Alert cancelled. Power has been restored."
+				: "Alert cancelled. Power has been restored without our assistance.");
+
+			StopRestore();
+		}
+
+		private void StopRestore()
+		{
+			StopCoroutine(routine);
+			tryingToRestorePower = false;
+		}
+
+		private void SendChatMessage(string message)
+		{
+			Chat.AddExamineMsgFromServer(gameObject, message);
 		}
 
 		#endregion
@@ -897,9 +1173,48 @@ namespace Systems.Ai
 			lineRenderer.enabled = false;
 		}
 
+		[Command]
+		private void CmdSetVisibilityToOtherAis()
+		{
+			SetVisibilityToOtherAis(true);
+		}
+
+		[Server]
+		//Sets Ai sprite for all players
+		private void SetVisibilityToOtherAis(bool isVisible)
+		{
+			foreach (var player in PlayerList.Instance.GetAllPlayers())
+			{
+				if(player.Script.PlayerState != PlayerScript.PlayerStates.Ai) continue;
+
+				player.Script.GetComponent<AiPlayer>().OrNull()?.TargetRpcSetSpriteVisibility(connectionToClient, isVisible);
+			}
+		}
+
+		[TargetRpc]
+		private void TargetRpcSetSpriteVisibility(NetworkConnection conn, bool isVisible)
+		{
+			//Reset sprite layer, 31 ghost, 8 for players
+			SetSpriteVisibility(isVisible);
+		}
+
+
+		[Client]
+		private void SetSpriteVisibility(bool isVisible)
+		{
+			//Reset sprite layer, 8 for players, 31 for ghosts
+			mainSprite.layer = isVisible ? 8 : 31;
+		}
+
 		#endregion
 
 		#region Death
+
+		[Server]
+		public void Suicide()
+		{
+			Death();
+		}
 
 		[Server]
 		private void Death()
@@ -907,10 +1222,7 @@ namespace Systems.Ai
 			if(hasDied) return;
 			hasDied = true;
 
-			if (connectionToClient != null)
-			{
-				TargetRpcTurnOffCameras(connectionToClient);
-			}
+			ToggleCameras(false);
 
 			Chat.AddExamineMsgFromServer(gameObject, $"You have been destroyed");
 
@@ -959,6 +1271,59 @@ namespace Systems.Ai
 		#endregion
 
 		#region Laws
+
+		[Server]
+		public void UploadLawModule(HandApply interaction, bool isUploadConsole = false)
+		{
+			//Check Ai isn't dead, or carded and disallowed interactions
+			if (HasDied || (isCarded && allowRemoteAction == false))
+			{
+				Chat.AddExamineMsgFromServer(interaction.Performer, $"Unable to connect to {gameObject.ExpensiveName()}");
+				return;
+			}
+
+			//Must have used module, but do check in case
+			if (interaction.HandObject.TryGetComponent<AiLawModule>(out var module) == false)
+			{
+				Chat.AddExamineMsgFromServer(interaction.Performer, $"Can only use a module on this {(isUploadConsole ? "console" : "core")}");
+				return;
+			}
+
+			var lawFromModule = module.GetLawsFromModule(interaction.PerformerPlayerScript);
+
+			if (module.AiModuleType == AiModuleType.Purge || module.AiModuleType == AiModuleType.Reset)
+			{
+				var isPurge = module.AiModuleType == AiModuleType.Purge;
+				ResetLaws(isPurge);
+				Chat.AddActionMsgToChat(interaction.Performer, $"You {(isPurge ? "purge" : "reset")} all of {gameObject.ExpensiveName()}'s laws",
+					$"{interaction.Performer.ExpensiveName()} {(isPurge ? "purges" : "resets")} all of {gameObject.ExpensiveName()}'s laws");
+				return;
+			}
+
+			if (lawFromModule.Count == 0)
+			{
+				Chat.AddExamineMsgFromServer(interaction.Performer, "No laws to upload");
+				return;
+			}
+
+			//If we are only adding core laws then we must mean to remove old core laws
+			//This means we are assuming that the law set must only have core laws if it is to replace the old laws fully
+			var notOnlyCoreLaws = false;
+
+			foreach (var law in lawFromModule)
+			{
+				if (law.Key != AiPlayer.LawOrder.Core)
+				{
+					notOnlyCoreLaws = true;
+					break;
+				}
+			}
+
+			SetLaws(lawFromModule, true, notOnlyCoreLaws);
+
+			Chat.AddActionMsgToChat(interaction.Performer, $"You change {gameObject.ExpensiveName()} laws",
+				$"{interaction.Performer.ExpensiveName()} changes {gameObject.ExpensiveName()} laws");
+		}
 
 		//Add one law
 		//Wont allow more than one traitor law
@@ -1169,6 +1534,13 @@ namespace Systems.Ai
 			foreach (var lawData in newData)
 			{
 				aiLaws.Add(lawData.LawOrder, lawData.Laws.ToList());
+			}
+
+			Init();
+
+			if (aiUi.aiPlayer == null)
+			{
+				aiUi.SetUp(this);
 			}
 
 			aiUi.OpenLaws();

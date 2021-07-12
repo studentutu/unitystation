@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using Light2D;
 using Mirror;
 using UnityEngine;
@@ -19,7 +20,7 @@ namespace Blob
 	/// <summary>
 	/// Class which has the logic and data for the blob player
 	/// </summary>
-	public class BlobPlayer : NetworkBehaviour
+	public class BlobPlayer : NetworkBehaviour, IAdminInfo
 	{
 		[SerializeField] private GameObject blobCorePrefab = null;
 		[SerializeField] private GameObject blobNodePrefab = null;
@@ -1526,7 +1527,7 @@ namespace Blob
 				blobStructure.lightSprite.Color.a = 0.2f;
 			}
 
-			blobStructure.spriteHandler.SetSpriteSO(blobStructure.activeSprite, NewvariantIndex: Random.Range(0, blobStructure.activeSprite.Variance.Count));
+			blobStructure.spriteHandler.SetSpriteSO(blobStructure.activeSprite, newVariantIndex: Random.Range(0, blobStructure.activeSprite.Variance.Count));
 			blobStructure.spriteHandler.SetColor(currentStrain.color);
 		}
 
@@ -1819,7 +1820,7 @@ namespace Blob
 
 			foreach (var offset in coords)
 			{
-				registerObject.Matrix.ReactionManager.ExposeHotspotWorldPosition((offset + pos).To2Int());
+				registerObject.Matrix.ReactionManager.ExposeHotspotWorldPosition((offset + pos).To2Int(), 500);
 			}
 		}
 
@@ -2084,6 +2085,17 @@ namespace Blob
 		}
 
 		#endregion
+
+		public string AdminInfoString()
+		{
+			var adminInfo = new StringBuilder();
+
+			adminInfo.AppendLine($"Resources: {resources}");
+			adminInfo.AppendLine($"Health: {health}%");
+			adminInfo.AppendLine($"Victory: {numOfNonSpaceBlobTiles / numOfTilesForVictory}%");
+
+			return adminInfo.ToString();
+		}
 	}
 
 	public enum BlobConstructs

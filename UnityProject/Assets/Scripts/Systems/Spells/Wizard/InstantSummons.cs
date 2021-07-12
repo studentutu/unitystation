@@ -57,29 +57,29 @@ namespace Systems.Spells.Wizard
 		{
 			string summonedName = summonedObject.ExpensiveName();
 			Chat.AddActionMsgToChat(summonedObject,
-				"<color='red'>You feel a magical force transposing you!</color>",
-				$"<color='red'>The {summonedName} suddenly disappears!</color>");
+				"<color=red>You feel a magical force transposing you!</color>",
+				$"<color=red>The {summonedName} suddenly disappears!</color>");
 
 			TeleportObjectToPosition(summonedObject, caster.Script.WorldPos);
 
 			if (summonedObject.TryGetComponent<Pickupable>(out var pickupable))
 			{
-				ItemSlot slot = caster.Script.ItemStorage.GetBestHandOrSlotFor(summonedObject);
+				ItemSlot slot = caster.Script.DynamicItemStorage.GetBestHandOrSlotFor(summonedObject);
 				Inventory.ServerAdd(pickupable, slot);
 
 				Chat.AddActionMsgToChat(caster.GameObject, $"The {summonedName} appears in your hand!",
-					$"<color='red'>A {summonedName} suddenly appears in {caster.Script.visibleName}'s hand!</color>");
+					$"<color=red>A {summonedName} suddenly appears in {caster.Script.visibleName}'s hand!</color>");
 			}
 			else
 			{
-				string message = $"<color='red'>The {summonedName} suddenly appears!</color>";
+				string message = $"<color=red>The {summonedName} suddenly appears!</color>";
 				Chat.AddActionMsgToChat(caster.GameObject, message, message);
 			}
 		}
 
 		private void TryAddMark()
 		{
-			DynamicItemStorage playerStorage = caster.Script.ItemStorage;
+			DynamicItemStorage playerStorage = caster.Script.DynamicItemStorage;
 
 			ItemSlot activeHand = playerStorage.GetActiveHandSlot();
 			if (activeHand.IsOccupied)
@@ -130,7 +130,8 @@ namespace Systems.Spells.Wizard
 		{
 			if (item.TryGetComponent<Pickupable>(out var pickupable) && pickupable.ItemSlot != null)
 			{
-				return pickupable.ItemSlot.GetRootStorage().gameObject;
+				var RootStorage = pickupable.ItemSlot.GetRootStorageOrPlayer();
+				return RootStorage.gameObject;
 			}
 
 			return item;

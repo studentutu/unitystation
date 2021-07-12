@@ -39,11 +39,6 @@ public class ClothingItem : MonoBehaviour
 	public PlayerScript thisPlayerScript;
 
 	/// <summary>
-	/// Player equipped or unequipped some clothing from ClothingItem slot
-	/// </summary>
-	public event OnClothingEquippedDelegate OnClothingEquipped;
-
-	/// <summary>
 	/// Direction clothing is facing (absolute)
 	/// </summary>
 	public Orientation Direction
@@ -97,7 +92,7 @@ public class ClothingItem : MonoBehaviour
 					thisPlayerScript.Equipment.obscuredSlots &= ~unequippedClothing.HiddenSlots;
 
 					if (unequippedClothing)
-						OnClothingEquipped?.Invoke(unequippedClothing, false);
+						thisPlayerScript.playerSprites.OnClothingEquipped(unequippedClothing, true);
 				}
 			}
 
@@ -126,8 +121,7 @@ public class ClothingItem : MonoBehaviour
 				// But for the others, we call the OnClothingEquipped event.
 				if (equippedClothing)
 				{
-					// call the event of equiped clothing
-					OnClothingEquipped?.Invoke(equippedClothing, true);
+					thisPlayerScript.playerSprites.OnClothingEquipped(equippedClothing, true);
 				}
 			}
 		}
@@ -142,7 +136,7 @@ public class ClothingItem : MonoBehaviour
 		List<Color> palette = clothing.GetComponent<ItemAttributesV2>()?.ItemSprites?.Palette;
 		if (palette != null)
 		{
-			spriteHandler.SetPaletteOfCurrentSprite(palette, Network: false);
+			spriteHandler.SetPaletteOfCurrentSprite(palette, networked: false);
 		}
 
 
@@ -196,14 +190,14 @@ public class ClothingItem : MonoBehaviour
 		{
 			if (spriteType == SpriteHandType.RightHand)
 			{
-				spriteHandler.SetSpriteSO(_ItemsSprites.SpriteRightHand, Network: false);
+				spriteHandler.SetSpriteSO(_ItemsSprites.SpriteRightHand, networked: false);
 			}
 			else
 			{
-				spriteHandler.SetSpriteSO(_ItemsSprites.SpriteLeftHand, Network: false);
+				spriteHandler.SetSpriteSO(_ItemsSprites.SpriteLeftHand, networked: false);
 			}
 
-			spriteHandler.SetPaletteOfCurrentSprite(_ItemsSprites.Palette, Network: false);
+			spriteHandler.SetPaletteOfCurrentSprite(_ItemsSprites.Palette, networked: false);
 		}
 	}
 }

@@ -17,6 +17,7 @@ using Items.Tool;
 using Messages.Server;
 using Objects.Research;
 using Shuttles;
+using UI.Core;
 using UI.Items;
 
 public partial class PlayerNetworkActions : NetworkBehaviour
@@ -35,7 +36,7 @@ public partial class PlayerNetworkActions : NetworkBehaviour
 
 	private PlayerMove playerMove;
 	private PlayerScript playerScript;
-	public DynamicItemStorage itemStorage => playerScript.ItemStorage;
+	public DynamicItemStorage itemStorage => playerScript.DynamicItemStorage;
 	public Transform chatBubbleTarget;
 
 	public bool IsRolling { get; private set; } = false;
@@ -112,7 +113,7 @@ public partial class PlayerNetworkActions : NetworkBehaviour
 		else if (playerScript.playerMove.IsCuffed) // Check if cuffed.
 		{
 			if (playerScript.playerSprites != null &&
-			    playerScript.playerSprites.clothes.TryGetValue("handcuffs", out var cuffsClothingItem))
+			    playerScript.playerSprites.clothes.TryGetValue(NamedSlot.handcuffs, out var cuffsClothingItem))
 			{
 				if (cuffsClothingItem != null &&
 				    cuffsClothingItem.TryGetComponent<RestraintOverlay>(out var restraintOverlay))
@@ -150,12 +151,12 @@ public partial class PlayerNetworkActions : NetworkBehaviour
 
 		// Drop player items
 
-		foreach (var itemSlot in playerScript.ItemStorage.GetNamedItemSlots(NamedSlot.leftHand))
+		foreach (var itemSlot in playerScript.DynamicItemStorage.GetNamedItemSlots(NamedSlot.leftHand))
 		{
 			Inventory.ServerDrop(itemSlot);
 		}
 
-		foreach (var itemSlot in playerScript.ItemStorage.GetNamedItemSlots(NamedSlot.rightHand))
+		foreach (var itemSlot in playerScript.DynamicItemStorage.GetNamedItemSlots(NamedSlot.rightHand))
 		{
 			Inventory.ServerDrop(itemSlot);
 		}
@@ -284,28 +285,32 @@ public partial class PlayerNetworkActions : NetworkBehaviour
 	public void CmdDisrobe(GameObject toDisrobe)
 	{
 		if (!Validations.CanApply(playerScript, toDisrobe, NetworkSide.Server)) return;
-		//only allowed if this player is an observer of the player to disrobe
-		var itemStorage = toDisrobe.GetComponent<ItemStorage>();
-		if (itemStorage == null) return;
 
-		//are we an observer of the player to disrobe?
-		if (!itemStorage.ServerIsObserver(gameObject)) return;
+		//only allowed if this player is an observer of the player to disrobe
+		var dynamicItemStorage = toDisrobe.GetComponent<DynamicItemStorage>();
+		if (dynamicItemStorage == null) return;
 
 		//disrobe each slot, taking .2s per each occupied slot
 		//calculate time
-		var occupiedSlots = itemStorage.GetItemSlots()
+		var occupiedSlots = dynamicItemStorage.GetItemSlots()
 			.Count(slot => slot.NamedSlot != NamedSlot.handcuffs && !slot.IsEmpty);
-		if (occupiedSlots == 0) return;
-		if (!Cooldowns.TryStartServer(playerScript, CommonCooldowns.Instance.Interaction)) return;
-		var timeTaken = occupiedSlots * .4f;
 
+		if (occupiedSlots == 0) return;
+
+		if (!Cooldowns.TryStartServer(playerScript, CommonCooldowns.Instance.Interaction)) return;
+
+		var timeTaken = occupiedSlots * .4f;
 		void ProgressComplete()
 		{
 			var victimsHealth = toDisrobe.GetComponent<PlayerHealthV2>();
-			foreach (var itemSlot in itemStorage.GetItemSlots())
+			foreach (var itemSlot in dynamicItemStorage.GetItemSlots())
 			{
+				//are we an observer of the player to disrobe?
+				if (itemSlot.ServerIsObservedBy(gameObject) == false) continue;
+
 				//skip slots which have special uses
 				if (itemSlot.NamedSlot == NamedSlot.handcuffs) continue;
+
 				// cancels out of the loop if player gets up
 				if (!victimsHealth.IsCrit) break;
 
@@ -338,7 +343,7 @@ public partial class PlayerNetworkActions : NetworkBehaviour
 		if (!Cooldowns.TryStartServer(playerScript, CommonCooldowns.Instance.Interaction)) return;
 
 		if (playerScript.playerSprites != null &&
-		    playerScript.playerSprites.clothes.TryGetValue("handcuffs", out var cuffsClothingItem))
+		    playerScript.playerSprites.clothes.TryGetValue(NamedSlot.handcuffs, out var cuffsClothingItem))
 		{
 			if (cuffsClothingItem != null &&
 			    cuffsClothingItem.TryGetComponent<RestraintOverlay>(out var restraintOverlay))
@@ -692,7 +697,7 @@ public partial class PlayerNetworkActions : NetworkBehaviour
 
 		if (handID != 0)
 		{
-			var slot = playerScript.ItemStorage.GetNamedItemSlot(NetworkIdentity.spawned[handID].gameObject, NamedSlot);
+			var slot = playerScript.DynamicItemStorage.GetNamedItemSlot(NetworkIdentity.spawned[handID].gameObject, NamedSlot);
 			if (slot == null) return;
 			activeHand = NetworkIdentity.spawned[handID].gameObject;
 		}
@@ -871,11 +876,11 @@ public partial class PlayerNetworkActions : NetworkBehaviour
 		var reactionManager = onObject.GetComponentInParent<ReactionManager>();
 		if (reactionManager == null) return;
 
-		reactionManager.ExposeHotspotWorldPosition(onObject.TileWorldPosition());
-		reactionManager.ExposeHotspotWorldPosition(onObject.TileWorldPosition() + Vector2Int.down);
-		reactionManager.ExposeHotspotWorldPosition(onObject.TileWorldPosition() + Vector2Int.left);
-		reactionManager.ExposeHotspotWorldPosition(onObject.TileWorldPosition() + Vector2Int.up);
-		reactionManager.ExposeHotspotWorldPosition(onObject.TileWorldPosition() + Vector2Int.right);
+		reactionManager.ExposeHotspotWorldPosition(onObject.TileWorldPosition(), 1000, true);
+		reactionManager.ExposeHotspotWorldPosition(onObject.TileWorldPosition() + Vector2Int.down, 1000, true);
+		reactionManager.ExposeHotspotWorldPosition(onObject.TileWorldPosition() + Vector2Int.left, 1000, true);
+		reactionManager.ExposeHotspotWorldPosition(onObject.TileWorldPosition() + Vector2Int.up, 1000, true);
+		reactionManager.ExposeHotspotWorldPosition(onObject.TileWorldPosition() + Vector2Int.right, 1000, true);
 	}
 
 	[Command]
@@ -935,19 +940,22 @@ public partial class PlayerNetworkActions : NetworkBehaviour
 		playerScript.mind.ShowObjectives();
 	}
 
-	[Command]
-	public void CmdFilledModuleInput(GameObject module, string input)
+	[TargetRpc]
+	public void TargetRpcOpenInput(GameObject objectForInput, string title, string currentText)
 	{
-		if(module == null || module.TryGetComponent<AiLawModule>(out var moduleScript) == false) return;
+		if(objectForInput == null) return;
 
-		if (playerScript.Equipment.ItemStorage.GetActiveHandSlot()?.Item.gameObject != module)
+		UIManager.Instance.GeneralInputField.OnOpen(objectForInput, title, currentText);
+	}
+
+	[Command]
+	public void CmdFilledDynamicInput(GameObject forGameObject, string input)
+	{
+		if(forGameObject == null) return;
+
+		foreach (var dynamicInput in forGameObject.GetComponents<IDynamicInput>())
 		{
-			Chat.AddExamineMsgFromServer(gameObject, $"{module.ExpensiveName()} must be in your hands to use");
-			return;
+			dynamicInput.OnInputFilled(input, playerScript);
 		}
-
-		moduleScript.ServerSetCustomLaw(input);
-
-		Chat.AddExamineMsgFromServer(gameObject, $"Law Module Change To:\n {moduleScript.CustomLaw}");
 	}
 }

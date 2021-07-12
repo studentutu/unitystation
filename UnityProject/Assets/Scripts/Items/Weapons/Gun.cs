@@ -528,8 +528,9 @@ namespace Weapons
 			//if we are client, only process this if we are holding it
 			if (!isServer)
 			{
-				if (PlayerManager.LocalPlayerScript.ItemStorage.GetActiveHandSlot() == null) return;
-				var heldItem = PlayerManager.LocalPlayerScript.ItemStorage.GetActiveHandSlot().ItemObject;
+				if (PlayerManager.LocalPlayerScript.DynamicItemStorage.OrNull()?.GetActiveHandSlot() == null) return;
+
+				var heldItem = PlayerManager.LocalPlayerScript.DynamicItemStorage.GetActiveHandSlot().ItemObject;
 				if (gameObject != heldItem) return;
 			}
 
@@ -753,7 +754,7 @@ namespace Weapons
 				DisplayShot(nextShot.shooter, nextShot.finalDirection, nextShot.damageZone, nextShot.isSuicide, toShoot.name, quantity);
 
 				//trigger a hotspot caused by gun firing
-				shooterRegisterTile.Matrix.ReactionManager.ExposeHotspotWorldPosition(nextShot.shooter.TileWorldPosition());
+				shooterRegisterTile.Matrix.ReactionManager.ExposeHotspotWorldPosition(nextShot.shooter.TileWorldPosition(), 500);
 
 				//tell all the clients to display the shot
 				ShootMessage.SendToAll(nextShot.finalDirection, nextShot.damageZone, nextShot.shooter, this.gameObject, nextShot.isSuicide, toShoot.name, quantity);

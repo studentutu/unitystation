@@ -1,11 +1,12 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using Core.Input_System.InteractionV2.Interactions;
 using UnityEngine;
 
 namespace Pipes
 {
-	public class Metre : MonoBehaviour, ICheckedInteractable<HandApply>, IExaminable
+	public class Metre : MonoBehaviour, ICheckedInteractable<HandApply>, IExaminable, ICheckedInteractable<AiActivate>
 	{
 		public SpriteHandler spriteHandler;
 		public MetaDataNode metaDataNode;
@@ -31,9 +32,24 @@ namespace Pipes
 			Chat.AddExamineMsgFromServer(interaction.Performer, ReadMeter());
 		}
 
+		public bool WillInteract(AiActivate interaction, NetworkSide side)
+		{
+			//Only normal click
+			if (interaction.ClickType != AiActivate.ClickTypes.NormalClick) return false;
+
+			if (DefaultWillInteract.AiActivate(interaction, side) == false) return false;
+
+			return true;
+		}
+
+		public void ServerPerformInteraction(AiActivate interaction)
+		{
+			Chat.AddExamineMsgFromServer(interaction.Performer, ReadMeter());
+		}
+
 		private string ReadMeter()
 		{
-			if (metaDataNode.PipeData.Count > 0)
+			if (metaDataNode?.PipeData?.Count > 0)
 			{
 				var gasInfo = metaDataNode.PipeData[0].pipeData.GetMixAndVolume;
 				string pressure = gasInfo.Density().y.ToString("#.00");

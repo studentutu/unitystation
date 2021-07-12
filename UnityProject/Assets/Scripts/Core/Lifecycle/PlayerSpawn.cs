@@ -64,14 +64,14 @@ public static class PlayerSpawn
 			message += " Invalid player skin tone.";
 			isOk = false;
 		}
-		*/
+
 
 		if(ServerValidations.HasIllegalCharacterName(request.CharacterSettings.Name))
 		{
 			message += " Invalid player character name.";
 			isOk = false;
 		}
-
+		*/
 		if(ServerValidations.HasIllegalCharacterAge(request.CharacterSettings.Age))
 		{
 			message += " Invalid character age.";
@@ -248,8 +248,11 @@ public static class PlayerSpawn
 				occupation.BackgroundColor,
 				occupation.PlaySound);
 		}
+		if (info.SpawnItems)
+		{
+			newPlayer.GetComponent<DynamicItemStorage>()?.SetUpOccupation(occupation);
+		}
 
-		newPlayer.GetComponent<DynamicItemStorage>()?.SetUpOccupation(occupation);
 
 		return newPlayer;
 	}
@@ -337,7 +340,7 @@ public static class PlayerSpawn
 		if (spawnPosition == TransformState.HiddenPos)
 		{
 			//spawn ghost at occupation location if we can't determine where their body is
-			Transform spawnTransform = SpawnPoint.GetRandomPointForJob(forMind.occupation.JobType);
+			Transform spawnTransform = SpawnPoint.GetRandomPointForJob(forMind.occupation.JobType, true);
 			if (spawnTransform == null)
 			{
 				Logger.LogErrorFormat("Unable to determine spawn position for occupation {1}. Cannot spawn ghost.", Category.Ghosts,
@@ -506,7 +509,13 @@ public static class PlayerSpawn
 			TriggerEventMessage.SendTo(newBody, eventType);
 
 			//can observe their new inventory
-			newBody.GetComponent<DynamicItemStorage>()?.ServerAddObserverPlayer(newBody);
+			var dynamicItemStorage = newBody.GetComponent<DynamicItemStorage>();
+			if (dynamicItemStorage != null)
+			{
+				dynamicItemStorage.ServerAddObserverPlayer(newBody);
+				PlayerPopulateInventoryUIMessage.Send(dynamicItemStorage, newBody);
+			}
+
 		}
 
 		var playerScript = newBody.GetComponent<PlayerScript>();

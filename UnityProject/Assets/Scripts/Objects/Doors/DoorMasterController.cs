@@ -68,6 +68,7 @@ namespace Doors
 		public bool IsPerformingAction => isPerformingAction;
 		public bool HasPower => APCPoweredDevice.IsOn(apc.State);
 
+
 		private RegisterDoor registerTile;
 		public RegisterDoor RegisterTile => registerTile;
 		private SpriteRenderer spriteRenderer;
@@ -138,14 +139,23 @@ namespace Doors
 			}
 
 			bool canOpen = true;
-
+			HashSet<DoorProcessingStates> states = new HashSet<DoorProcessingStates>();
 			foreach (var module in modulesList)
 			{
-				ModuleSignal signal = module.BumpingInteraction(byPlayer);
+				ModuleSignal signal = module.BumpingInteraction(byPlayer, states);
 
 				if (!module.CanDoorStateChange() || signal == ModuleSignal.ContinueWithoutDoorStateChange)
 				{
 					canOpen = false;
+				}
+
+				if(signal == ModuleSignal.ContinueRegardlessOfOtherModulesStates)
+				{
+					//(Max): This is to prevent some modules breaking some door behavior and rendering them un-useable.
+					//Only use this signal if you're module's logic is being interrupted by other
+					//modules that are sending ContinueWithoutDoorStateChange as a signal.
+					canOpen = true;
+					break;
 				}
 
 				if (signal == ModuleSignal.SkipRemaining || signal == ModuleSignal.Break)
@@ -155,7 +165,7 @@ namespace Doors
 				}
 			}
 
-			if (!isPerformingAction && canOpen)
+			if (!isPerformingAction && canOpen && CheckStatusAllow(states))
 			{
 				TryOpen(byPlayer);
 			}
@@ -191,10 +201,11 @@ namespace Doors
 		/// <param name="interaction"></param>
 		public void OpenInteraction(HandApply interaction)
 		{
+			HashSet<DoorProcessingStates> states = new HashSet<DoorProcessingStates>();
 			bool canClose = true;
 			foreach (DoorModuleBase module in modulesList)
 			{
-				ModuleSignal signal = module.OpenInteraction(interaction);
+				ModuleSignal signal = module.OpenInteraction(interaction, states);
 
 				if (!module.CanDoorStateChange() || signal == ModuleSignal.ContinueWithoutDoorStateChange)
 				{
@@ -214,9 +225,9 @@ namespace Doors
 				}
 			}
 
-			if (!isPerformingAction && canClose)
+			if (!isPerformingAction && canClose && CheckStatusAllow(states))
 			{
-				TryClose(interaction.Performer);
+				TryClose(interaction.Performer, OverrideLogic: true);
 			}
 
 			StartInputCoolDown();
@@ -230,14 +241,16 @@ namespace Doors
 		public void ClosedInteraction(HandApply interaction)
 		{
 			bool canOpen = true;
+			HashSet<DoorProcessingStates> states = new HashSet<DoorProcessingStates>();
 			foreach (DoorModuleBase module in modulesList)
 			{
-				ModuleSignal signal = module.ClosedInteraction(interaction);
+				ModuleSignal signal = module.ClosedInteraction(interaction, states);
 
 				if (!module.CanDoorStateChange() || signal == ModuleSignal.ContinueWithoutDoorStateChange)
 				{
 					canOpen = false;
 				}
+
 
 				if (signal == ModuleSignal.SkipRemaining)
 				{
@@ -250,7 +263,7 @@ namespace Doors
 				}
 			}
 
-			if (!isPerformingAction && canOpen)
+			if (!isPerformingAction && (canOpen) && CheckStatusAllow(states))
 			{
 				TryOpen(interaction.Performer);
 			}
@@ -260,10 +273,23 @@ namespace Doors
 			}
 		}
 
+		public bool CheckStatusAllow(HashSet<DoorProcessingStates> states)
+		{
+			if (states.Contains(DoorProcessingStates.SoftwarePrevented))
+			{
+				return states.Contains(DoorProcessingStates.SoftwareHacked);
+			}
+			else
+			{
+				return true;
+			}
+		}
+
+
 		public void TryOpen(GameObject originator, bool blockClosing = false)
 		{
 			if(IsClosed == false || isPerformingAction) return;
-			
+
 			if(HasPower == false)
 			{
 				Chat.AddExamineMsgFromServer(originator, $"{gameObject.ExpensiveName()} is unpowered");
@@ -293,6 +319,7 @@ namespace Doors
 			Open();
 		}
 
+
 		/// <summary>
 		/// Try to force the door closed regardless of access/internal fuckery.
 		/// Purely check to see if there is something physically restraining the door from being closed such as a weld or door bolts.
@@ -312,14 +339,52 @@ namespace Doors
 			Close();
 		}
 
-		public void TryClose(GameObject originator = null, bool force = false)
+		public void TryClose(GameObject originator = null, bool force = false, bool OverrideLogic = false)
 		{
 			// Sliding door is not passable according to matrix
 			if(!isPerformingAction &&
 				(ignorePassableChecks || matrix.CanCloseDoorAt( registerTile.LocalPositionServer, true )) &&
-				HasPower || force)
+				(HasPower || force ) )
+
 			{
-				Close();
+				if (OverrideLogic)
+				{
+					Close();
+				}
+				else
+				{
+					HashSet<DoorProcessingStates> states = new HashSet<DoorProcessingStates>();
+					bool canClose = true;
+					foreach (DoorModuleBase module in modulesList)
+					{
+						ModuleSignal signal = module.OpenInteraction(null, states);
+
+						if (!module.CanDoorStateChange() || signal == ModuleSignal.ContinueWithoutDoorStateChange)
+						{
+							canClose = false;
+						}
+
+						if (signal == ModuleSignal.SkipRemaining)
+						{
+							break;
+						}
+
+						if (signal == ModuleSignal.Break)
+						{
+							ResetWaiting();
+							return;
+						}
+					}
+
+					if (!isPerformingAction && canClose && CheckStatusAllow(states))
+					{
+						Close();
+					}
+					else
+					{
+						ResetWaiting();
+					}
+				}
 			}
 			else
 			{
@@ -436,6 +501,7 @@ namespace Doors
 
 			return true;
 		}
+
 
 		public void StartInputCoolDown()
 		{
@@ -621,7 +687,11 @@ namespace Doors
 				if(module is BoltsModule bolts)
 				{
 					valuesToSend.Add(new ElementValue() { Id = "BoltLabel", Value = Encoding.UTF8.GetBytes(bolts.BoltsDown ? "Bolted" : "Unbolted") });
-					break;
+				}
+
+				if (module is ElectrifiedDoorModule electric)
+				{
+					valuesToSend.Add(new ElementValue() { Id = "ShockStateLabel", Value = Encoding.UTF8.GetBytes(electric.IsElectrecuted ? "DANGER" : "SAFE") });
 				}
 			}
 

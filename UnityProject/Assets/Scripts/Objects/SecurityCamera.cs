@@ -1,10 +1,15 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using Systems.Ai;
 using Systems.Electricity;
+using Systems.MobAIs;
 using Core.Input_System.InteractionV2.Interactions;
 using Mirror;
+using NUnit.Framework;
 using Objects.Research;
+using Objects.Wallmounts;
+using ScriptableObjects;
 using UnityEngine;
 using UnityEngine.Events;
 
@@ -23,6 +28,7 @@ namespace Objects
 		public string CameraName => cameraName;
 
 		[SerializeField]
+		[SyncVar(hook = nameof(SyncChannel))]
 		private string securityCameraChannel = "Station";
 		public string SecurityCameraChannel => securityCameraChannel;
 
@@ -55,6 +61,15 @@ namespace Objects
 		private APCPoweredDevice apcPoweredDevice;
 		private Integrity integrity;
 
+		[SerializeField]
+		[Tooltip("Whether this camera will send an alert if motion is detected near it (Players/Mobs)")]
+		private bool motionSensingCamera;
+
+		[SerializeField]
+		[Tooltip("Sensing Range")]
+		[UnityEngine.Range(0, 25)]
+		private int motionSensingRange = 5;
+
 		[NonSerialized]
 		public UnityEvent<bool> OnStateChange = new UnityEvent<bool>();
 
@@ -70,10 +85,11 @@ namespace Objects
 			if (cameras.ContainsKey(securityCameraChannel) == false)
 			{
 				cameras.Add(securityCameraChannel, new List<SecurityCamera> {this});
-				return;
 			}
-
-			cameras[securityCameraChannel].Add(this);
+			else
+			{
+				cameras[securityCameraChannel].Add(this);
+			}
 
 			cameraActive = !wiresCut;
 
@@ -87,6 +103,11 @@ namespace Objects
 
 				apcPoweredDevice.OrNull()?.OnStateChangeEvent.AddListener(PowerStateChanged);
 				integrity.OnWillDestroyServer.AddListener(OnCameraDestruction);
+
+				if (motionSensingCamera)
+				{
+					UpdateManager.Add(MotionSensingUpdate, 1f);
+				}
 			}
 		}
 
@@ -96,6 +117,8 @@ namespace Objects
 
 			apcPoweredDevice.OrNull()?.OnStateChangeEvent.RemoveListener(PowerStateChanged);
 			integrity.OnWillDestroyServer.RemoveListener(OnCameraDestruction);
+
+			UpdateManager.Remove(CallbackType.PERIODIC_UPDATE, MotionSensingUpdate);
 		}
 
 		#region Ai Camera Switching Interaction
@@ -162,10 +185,41 @@ namespace Objects
 			}
 		}
 
+		[Client]
+		private void SyncChannel(string oldState, string newState)
+		{
+			SetNewChannel(oldState, newState);
+		}
+
 		[Server]
 		public void ToggleLight(bool newState)
 		{
 			lightOn = newState;
+		}
+
+		public void SetUp(PlayerScript player)
+		{
+			if(player.connectedPlayer?.Connection == null) return;
+
+			player.playerNetworkActions.TargetRpcOpenInput(gameObject, "Camera Channel", securityCameraChannel);
+		}
+
+		private void SetNewChannel(string oldState, string newState)
+		{
+			if (cameras.TryGetValue(oldState, out var list))
+			{
+				list.Remove(this);
+			}
+
+			//Add new
+			if (cameras.ContainsKey(newState) == false)
+			{
+				cameras.Add(newState, new List<SecurityCamera> {this});
+			}
+			else
+			{
+				cameras[newState].Add(this);
+			}
 		}
 
 		#region Player Interaction
@@ -181,6 +235,8 @@ namespace Objects
 
 			if (Validations.HasItemTrait(interaction.HandObject, CommonTraits.Instance.Wirecutter)) return true;
 
+			if (Validations.HasUsedActiveWelder(interaction)) return true;
+
 			return false;
 		}
 
@@ -195,6 +251,12 @@ namespace Objects
 			if (Validations.HasItemTrait(interaction.HandObject, CommonTraits.Instance.Wirecutter))
 			{
 				TryCut(interaction);
+				return;
+			}
+
+			if (Validations.HasUsedActiveWelder(interaction))
+			{
+				TryWeld(interaction);
 			}
 		}
 
@@ -228,6 +290,45 @@ namespace Objects
 
 			Chat.AddActionMsgToChat(interaction.Performer, $"You {(wiresCut ? "cut" : "repair")} the cameras wiring",
 				$"{interaction.Performer.ExpensiveName()} {(panelOpen ? "cuts" : "repairs")} the cameras wiring");
+		}
+
+		private void TryWeld(HandApply interaction)
+		{
+			if (panelOpen == false)
+			{
+				Chat.AddExamineMsgFromServer(interaction.Performer, "Open the cameras back panel first");
+				return;
+			}
+
+			if (wiresCut == false)
+			{
+				Chat.AddExamineMsgFromServer(interaction.Performer, "Cut the cameras wires first");
+				return;
+			}
+
+			if (Validations.HasUsedActiveWelder(interaction))
+			{
+				//Unweld from wall
+				ToolUtils.ServerUseToolWithActionMessages(interaction, 2f,
+					"You start unwelding the camera assembly from the wall...",
+					$"{interaction.Performer.ExpensiveName()} starts unwelding the camera assembly from the wall...",
+					"You unweld the camera assembly onto the wall.",
+					$"{interaction.Performer.ExpensiveName()} unwelds the camera assembly from the wall.",
+					() =>
+					{
+						var result = Spawn.ServerPrefab(CommonPrefabs.Instance.CameraAssembly,
+							registerObject.WorldPositionServer,
+							transform.parent);
+
+						if (result.Successful)
+						{
+							result.GameObject.GetComponent<Directional>().FaceDirection(GetComponent<Directional>().CurrentDirection);
+							result.GameObject.GetComponent<CameraAssembly>().SetState(CameraAssembly.CameraAssemblyState.Unwelded);
+						}
+
+						_ = Despawn.ServerSingle(gameObject);
+					});
+			}
 		}
 
 		#endregion
@@ -297,6 +398,89 @@ namespace Objects
 		{
 			ServerSetCameraState(false);
 		}
+
+		#region Motion Sensing
+
+		private void MotionSensingUpdate()
+		{
+			var cameraPos = registerObject.WorldPositionServer;
+			var mobsFound = Physics2D.OverlapCircleAll(cameraPos.To2Int(),
+				motionSensingRange, LayerMask.GetMask("Players", "NPC"));
+
+			if (mobsFound.Length == 0)
+			{
+				//No targets
+				return;
+			}
+
+			//Order mobs by distance, sqrMag distance cheaper to calculate
+			var orderedMobs = mobsFound.OrderBy(
+				x => (cameraPos - x.transform.position).sqrMagnitude).ToList();
+
+			foreach (var mob in orderedMobs)
+			{
+				Vector3 worldPos;
+
+				//Testing for player
+				if (mob.TryGetComponent<PlayerScript>(out var script))
+				{
+					//Only target normal players and alive players can trigger sensor
+					if(script.PlayerState != PlayerScript.PlayerStates.Normal || script.IsDeadOrGhost) continue;
+
+					worldPos = script.WorldPos;
+				}
+				//Test for mobs
+				else if (mob.TryGetComponent<MobAI>(out var mobAi))
+				{
+					//Only alive mobs can trigger sensor
+					if(mobAi.IsDead) continue;
+
+					worldPos = mobAi.Cnt.ServerPosition;
+				}
+				else
+				{
+					//Must be allowed mob or player so dont target them
+					continue;
+				}
+
+				var linecast = MatrixManager.Linecast(cameraPos,
+					LayerTypeSelection.Walls, LayerMask.GetMask("Door Closed", "Walls"), worldPos);
+
+				//Check to see if we hit a wall or closed door
+				if(linecast.ItHit) continue;
+
+				SendAlert(orderedMobs, cameraPos);
+				break;
+			}
+		}
+
+		private void SendAlert(List<Collider2D> colliders, Vector3 cameraPos)
+		{
+			foreach (var player in PlayerList.Instance.GetAllPlayers())
+			{
+				if(player.Script.PlayerState != PlayerScript.PlayerStates.Ai) continue;
+
+				Chat.AddExamineMsgFromServer(player, $"ALERT: {gameObject.name} motion sensor activated");
+			}
+
+			foreach (var mob in colliders)
+			{
+				if(mob.TryGetComponent<PlayerScript>(out var script) == false) continue;
+
+				//Only target normal players and alive players
+				if(script.PlayerState != PlayerScript.PlayerStates.Normal || script.IsDeadOrGhost) continue;
+
+				var linecast = MatrixManager.Linecast(cameraPos,
+					LayerTypeSelection.Walls, LayerMask.GetMask("Door Closed", "Walls"), script.WorldPos);
+
+				//Check to see if we hit a wall or closed door
+				if(linecast.ItHit) continue;
+
+				Chat.AddExamineMsgFromServer(script.gameObject, "The camera light flashes red");
+			}
+		}
+
+		#endregion
 
 		public string Examine(Vector3 worldPos = default(Vector3))
 		{

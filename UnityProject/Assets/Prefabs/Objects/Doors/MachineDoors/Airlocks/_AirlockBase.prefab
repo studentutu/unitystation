@@ -103,12 +103,12 @@ MonoBehaviour:
   - {fileID: 11400000, guid: da6382ff06977d74ab7be8a1b19f65bb, type: 2}
   - {fileID: 11400000, guid: ef6303a1b3b0ec4489e8f87ef315efd5, type: 2}
   - {fileID: 11400000, guid: bc54afa99f62d904c99dbc6717cebd88, type: 2}
+  - {fileID: 11400000, guid: f198981ae0bd7c64d8071596aee94a88, type: 2}
   PresentSpriteSet: {fileID: 11400000, guid: 7d2de9c440cedfa4a855277fac47f8d0, type: 2}
   randomInitialSprite: 0
   pushTextureOnStartUp: 1
   variantIndex: 0
   palette: []
-  Sprites: []
 --- !u!1 &404576362407937357
 GameObject:
   m_ObjectHideFlags: 0
@@ -222,7 +222,6 @@ MonoBehaviour:
   pushTextureOnStartUp: 1
   variantIndex: 0
   palette: []
-  Sprites: []
 --- !u!114 &7418526098909645323
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -341,7 +340,6 @@ MonoBehaviour:
   pushTextureOnStartUp: 1
   variantIndex: 0
   palette: []
-  Sprites: []
 --- !u!1 &512806237205393311
 GameObject:
   m_ObjectHideFlags: 0
@@ -449,7 +447,6 @@ MonoBehaviour:
   pushTextureOnStartUp: 1
   variantIndex: 0
   palette: []
-  Sprites: []
 --- !u!1 &773641709186510069
 GameObject:
   m_ObjectHideFlags: 0
@@ -554,7 +551,6 @@ MonoBehaviour:
   pushTextureOnStartUp: 1
   variantIndex: 0
   palette: []
-  Sprites: []
 --- !u!1 &2233065044779290990
 GameObject:
   m_ObjectHideFlags: 0
@@ -667,7 +663,6 @@ MonoBehaviour:
   pushTextureOnStartUp: 1
   variantIndex: 0
   palette: []
-  Sprites: []
 --- !u!114 &5292488675851686727
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -695,6 +690,7 @@ GameObject:
   - component: {fileID: 2928157364170990969}
   - component: {fileID: 3801622674961811191}
   - component: {fileID: 6636148725921946958}
+  - component: {fileID: 5426044163123208281}
   m_Layer: 18
   m_Name: modules
   m_TagString: Untagged
@@ -801,6 +797,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 721556b81b487084782d2d54ec862919, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  IDToggleCard: {fileID: 0}
   needsClosedToLight: 1
   boltsUpSound:
     SetLoadSetting: 0
@@ -816,6 +813,20 @@ MonoBehaviour:
       m_AssetGUID: 
       m_SubObjectName: 
       m_SubObjectType: 
+--- !u!114 &5426044163123208281
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3444326074182531729}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f4adbb1cdeaa4e8eaf04bfb634d4735b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  voltageDamage: 9080
+  isElectrecuted: 0
 --- !u!114 &-2169664583946153626
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -829,6 +840,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   NetTabType: 42
+  aiInteractable: 1
 --- !u!114 &2243806384905767094
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1065,7 +1077,7 @@ PrefabInstance:
     - target: {fileID: 8330720231993589308, guid: 1291a5cb15d008c41bf0a373403f56b2,
         type: 3}
       propertyPath: wattusage
-      value: 840
+      value: 20
       objectReference: {fileID: 0}
     - target: {fileID: 8330720231993589308, guid: 1291a5cb15d008c41bf0a373403f56b2,
         type: 3}

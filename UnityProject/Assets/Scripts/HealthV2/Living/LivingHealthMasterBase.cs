@@ -144,7 +144,7 @@ namespace HealthV2
 		/// <summary>
 		/// A list of all body parts of the creature
 		/// </summary>
-		public List<BodyPart> ImplantList = new List<BodyPart>();
+		public HashSet<BodyPart> ImplantList = new HashSet<BodyPart>();
 
 		/// <summary>
 		/// A list of all body part containers of the creature.
@@ -230,11 +230,14 @@ namespace HealthV2
 
 		public virtual void Awake()
 		{
-			EnsureInit();
-			if(PlayerScriptOwner == null)
-			{
-				PlayerScriptOwner = this.gameObject.Player().Script;
-			}
+			RegisterTile = GetComponent<RegisterTile>();
+			RespiratorySystem = GetComponent<RespiratorySystemBase>();
+			CirculatorySystem = GetComponent<CirculatorySystemBase>();
+			objectBehaviour = GetComponent<ObjectBehaviour>();
+			healthStateController = GetComponent<HealthStateController>();
+			immunedSickness = new List<Sickness>();
+			mobSickness = GetComponent<MobSickness>();
+			PlayerScriptOwner = GetComponent<PlayerScript>();
 		}
 
 		void OnEnable()
@@ -253,25 +256,6 @@ namespace HealthV2
 			UpdateManager.Remove(CallbackType.PERIODIC_UPDATE, PeriodicUpdate);
 		}
 
-		public virtual void EnsureInit()
-		{
-			if (RegisterTile) return;
-			RegisterTile = GetComponent<RegisterTile>();
-			RespiratorySystem = GetComponent<RespiratorySystemBase>();
-			CirculatorySystem = GetComponent<CirculatorySystemBase>();
-			objectBehaviour = GetComponent<ObjectBehaviour>();
-			healthStateController = GetComponent<HealthStateController>();
-			immunedSickness = new List<Sickness>();
-			mobSickness = GetComponent<MobSickness>();
-
-			foreach (var implant in ImplantList)
-			{
-				//Debug.Log(implant.gameObject.name);
-				implant.HealthMaster = this;
-				implant.Initialisation();
-			}
-		}
-
 		public void Setbrain(Brain _brain)
 		{
 			brain = _brain;
@@ -279,9 +263,7 @@ namespace HealthV2
 
 		public override void OnStartServer()
 		{
-			EnsureInit();
 			mobID = PlayerManager.Instance.GetMobID();
-
 			//Generate BloodType and DNA
 			healthStateController.SetDNA(new DNAandBloodType());
 		}
@@ -309,6 +291,7 @@ namespace HealthV2
 		/// <param name="implant"></param>
 		public void AddNewImplant(BodyPart implant)
 		{
+			implant.HealthMaster = this;
 			ImplantList.Add(implant);
 		}
 
@@ -318,12 +301,6 @@ namespace HealthV2
 		public void RemoveImplant(BodyPart implantBase)
 		{
 			ImplantList.Remove(implantBase);
-		}
-
-		public override void OnStartClient()
-		{
-			base.OnStartClient();
-			EnsureInit();
 		}
 
 		//Server Side only
@@ -339,13 +316,20 @@ namespace HealthV2
 		//Server Side only
 		private void PeriodicUpdate()
 		{
-			foreach (var implant in RootBodyPartContainers)
+			if (IsDead == false)
 			{
-				implant.ImplantPeriodicUpdate();
+				foreach (var implant in RootBodyPartContainers)
+				{
+					implant.ImplantPeriodicUpdate();
+				}
 			}
+
 
 			fireStacksDamage();
 			CalculateRadiationDamage();
+
+			if (IsDead) return;
+
 			CalculateOverallHealth();
 		}
 
@@ -378,9 +362,10 @@ namespace HealthV2
 				if (node.GasMix.GetMoles(Gas.Oxygen) < 1)
 				{
 					healthStateController.SetFireStacks(0);
+					return;
 				}
 
-				RegisterTile.Matrix.ReactionManager.ExposeHotspotWorldPosition(gameObject.TileWorldPosition());
+				RegisterTile.Matrix.ReactionManager.ExposeHotspotWorldPosition(gameObject.TileWorldPosition(), 700, true);
 			}
 		}
 
@@ -745,45 +730,31 @@ namespace HealthV2
 			}
 		}
 
-		public virtual void ApplySlashDamage(float chance, BodyPartType aimedBodyPart, float damage)
+		/// <summary>
+		/// Applys Trauma Damage to a specified body part of the creature. Server only
+		/// </summary>
+		/// <param name="aimedBodyPart">Which body part do we target?</param>
+		/// <param name="damage">The Trauma damage value</param>
+		/// <param name="damageType">TraumaticDamageType enum, can be Slash, Burn and/or Pierce.</param>
+		[Server]
+		public virtual void ApplyTraumaDamage(BodyPartType aimedBodyPart, float damage, BodyPart.TramuticDamageTypes damageType)
 		{
-			if(DMMath.Prob(chance))
+			RootBodyPartContainer aimedPartContainer = null;
+			foreach (RootBodyPartContainer container in RootBodyPartContainers)
 			{
-				foreach (var bodyPartContainer in RootBodyPartContainers)
+				if (container.BodyPartType == aimedBodyPart)
 				{
-					if (bodyPartContainer.BodyPartType == aimedBodyPart)
-					{
-						bodyPartContainer.healthMaster.CirculatorySystem.Bleed(damage);
-						bodyPartContainer.TakeSlashDamage(damage);
-					}
+					aimedPartContainer = container;
 				}
 			}
-		}
 
-		public virtual void ApplyPierceDamage(float chance, BodyPartType aimedBodyPart, float damage)
-		{
-			if(DMMath.Prob(chance))
+			if(aimedPartContainer == null)
 			{
-				foreach (var bodyPartContainer in RootBodyPartContainers)
-				{
-					if (bodyPartContainer.BodyPartType == aimedBodyPart)
-					{
-						bodyPartContainer.healthMaster.CirculatorySystem.Bleed(damage);
-						bodyPartContainer.TakePierceDamage(damage);
-					}
-				}
+				Logger.LogError($"[LivingHealthBase/{name}] - Unable to find body part container. Skipping Trauma Damage.");
+				return;
 			}
-		}
 
-		public virtual void ApplyBurnDamage(BodyPartType aimedBodyPart, float damage)
-		{
-			foreach (var bodyPartContainer in RootBodyPartContainers)
-			{
-				if (bodyPartContainer.BodyPartType == aimedBodyPart)
-				{
-					bodyPartContainer.TakeBurnDamage(damage);
-				}
-			}
+			aimedPartContainer.TakeTraumaDamage(damage, damageType);
 		}
 
 		/// <summary>
@@ -902,6 +873,41 @@ namespace HealthV2
 
 		}
 
+
+		/// <summary>
+		/// Does the body part we're targeting suffer from traumatic damage?
+		/// </summary>
+		/// <param name="damageTypeToGet">Trauma damage type</param>
+		/// <param name="partType">targted body part.</param>
+		/// <returns></returns>
+		public bool HasTraumaDamage(BodyPartType partType)
+		{
+			foreach(var container in RootBodyPartContainers)
+			{
+				if(container.BodyPartType == partType)
+				{
+					foreach(BodyPart part in container.ContainsLimbs)
+					{
+						if (part.GetCurrentBurnDamage() > 0) return true;
+						if (part.GetCurrentSlashDamage() > 0) return true;
+						if (part.GetCurrentPierceDamage() > 0) return true;
+					}
+				}
+			}
+			return false;
+		}
+
+		public void HealTraumaDamage(float healAmount, BodyPartType targetBodyPartToHeal, BodyPart.TramuticDamageTypes typeToHeal)
+		{
+			foreach(var container in RootBodyPartContainers)
+			{
+				if(container.BodyPartType == targetBodyPartToHeal)
+				{
+					container.HealTraumaDamage(healAmount, typeToHeal);
+				}
+			}
+		}
+
 		/// <summary>
 		/// Revives a dead player to full health.
 		/// </summary>
@@ -959,12 +965,15 @@ namespace HealthV2
 		}
 
 		[Server]
-		protected virtual void Gib()
+		public virtual void Gib()
 		{
-			//TODO: Reimplement
-
-			//never destroy players!
-			_ = Despawn.ServerSingle(gameObject);
+			Death();
+			_ = SoundManager.PlayAtPosition(SingletonSOSounds.Instance.Slip, gameObject.transform.position, gameObject); //TODO: replace with gibbing noise
+			CirculatorySystem.Bleed(GetTotalBlood());
+			foreach(RootBodyPartContainer container in RootBodyPartContainers.ToArray())
+			{
+				container.RemoveLimbs();
+			}
 		}
 
 		/// ---------------------------
@@ -974,37 +983,25 @@ namespace HealthV2
 		/// Kills the creature, used for causes of death other than damage.
 		/// Currently not fully implemented
 		///</Summary>
-		public virtual void Death()
+		public void Death()
 		{
 			var HV2 = (this as PlayerHealthV2);
 			if (HV2 != null)
 			{
-				if (HV2.PlayerScript.OrNull()?.playerMove.OrNull()?.allowInput != null)
+				if (HV2.PlayerScriptOwner.OrNull()?.playerMove.OrNull()?.allowInput != null)
 				{
-					HV2.PlayerScript.playerMove.allowInput = false;
+					HV2.PlayerScriptOwner.playerMove.allowInput = false;
 				}
 
 			}
-
 			SetConsciousState(ConsciousState.DEAD);
 			OnDeathActions();
 			UpdateManager.Remove(CallbackType.UPDATE, UpdateMe);
-			UpdateManager.Remove(CallbackType.PERIODIC_UPDATE, PeriodicUpdate);
 			//TODO: Reimplemenmt
 		}
 
 		protected abstract void OnDeathActions();
 
-		public void OnFullyInitialised(Action TODO)
-		{
-			StartCoroutine(WaitForPlayerinitialisation(TODO));
-		}
-
-		public IEnumerator WaitForPlayerinitialisation(Action TODO)
-		{
-			yield return null;
-			TODO.Invoke();
-		}
 
 		/// <summary>
 		/// Updates the blood health stats from the server via NetMsg

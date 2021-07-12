@@ -4,11 +4,19 @@ using UnityEngine;
 using Systems.Atmospherics;
 using Objects.Atmospherics;
 using System.Text;
+using Pipes;
 
 namespace Items.Atmospherics
 {
-	public class AtmosphericAnalyser : MonoBehaviour, IInteractable<HandActivate>, IInteractable<PositionalHandApply>
+	public class AtmosphericAnalyser : MonoBehaviour, ICheckedInteractable<HandActivate>, IInteractable<PositionalHandApply>
 	{
+		public bool WillInteract(HandActivate interaction, NetworkSide side)
+		{
+			if (DefaultWillInteract.Default(interaction, side) == false) return false;
+
+			return true;
+		}
+
 		public void ServerPerformInteraction(HandActivate interaction)
 		{
 			var metaDataLayer = MatrixManager.AtPoint(interaction.PerformerPlayerScript.registerTile.WorldPositionServer, true).MetaDataLayer;
@@ -17,18 +25,26 @@ namespace Items.Atmospherics
 				var node = metaDataLayer.Get(interaction.Performer.transform.localPosition.RoundToInt());
 				if (node != null)
 				{
-					Chat.AddExamineMsgFromServer(interaction.Performer, $"</i><mspace=0.6em>{GetGasMixInfo(node.GasMix)}</mspace><i>");
+					Chat.AddExamineMsgFromServer(interaction.Performer, GetGasMixInfo(node.GasMix));
 				}
 			}
 		}
 
 		public void ServerPerformInteraction(PositionalHandApply interaction)
 		{
+			if (interaction.TargetObject == gameObject) return;
+
 			if (interaction.TargetObject != null)
 			{
 				if (interaction.TargetObject.TryGetComponent(out GasContainer container))
 				{
 					Chat.AddExamineMsgFromServer(interaction.Performer, GetGasMixInfo(container.GasMix));
+					return;
+				}
+
+				if (interaction.TargetObject.TryGetComponent(out MonoPipe monoPipe))
+				{
+					Chat.AddExamineMsgFromServer(interaction.Performer, GetGasMixInfo(monoPipe.pipeData.mixAndVolume.GetGasMix()));
 					return;
 				}
 			}
@@ -52,17 +68,17 @@ namespace Items.Atmospherics
 					$"Temperature: {gasMix.Temperature:0.##} K ({gasMix.Temperature - Reactions.KOffsetC:0.##} °C)\n");
 					// You want Fahrenheit? HAHAHAHA
 
-			foreach (var gas in Gas.All)
+			foreach (var gas in gasMix.GasesArray)
 			{
-				var ratio = gasMix.GasRatio(gas);
+				var ratio = gasMix.GasRatio(gas.GasSO);
 
 				if (ratio.Approx(0) == false)
 				{
-					sb.AppendLine($"{gas.Name}: {ratio:P}");
+					sb.AppendLine($"{gas.GasSO.Name}: {ratio:P}");
 				}
 			}
 
-			return sb.ToString();
+			return $"</i>{sb}<i>";
 		}
 	}
 }

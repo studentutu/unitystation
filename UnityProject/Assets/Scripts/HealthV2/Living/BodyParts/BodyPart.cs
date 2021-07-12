@@ -24,12 +24,9 @@ namespace HealthV2
 			set
 			{
 				healthMaster = value;
-				for (int i = ContainBodyParts.Count; i >= 0; i--)
+				foreach (var bodyPart in ContainBodyParts)
 				{
-					if (i < ContainBodyParts.Count)
-					{
-						SetUpBodyPart(ContainBodyParts[i]);
-					}
+					SetUpBodyPart(bodyPart);
 				}
 				HealthMasterSet();
 			}
@@ -150,6 +147,8 @@ namespace HealthV2
 
 		public string SetCustomisationData;
 
+		private bool SystemSetup = false;
+
 		/// <summary>
 		/// Initializes the body part
 		/// </summary>
@@ -178,6 +177,7 @@ namespace HealthV2
 			}
 
 			UpdateIcons();
+			SetUpSystemsThis();
 			foreach (var bodyPartModification in BodyPartModifications)
 			{
 				bodyPartModification.HealthMasterSet();
@@ -218,7 +218,6 @@ namespace HealthV2
 			health = maxHealth;
 			DamageInitialisation();
 			UpdateSeverity();
-			Initialisation();
 
 			BodyPartModifications = this.GetComponents<BodyPartModification>().ToList();
 
@@ -229,14 +228,7 @@ namespace HealthV2
 			}
 		}
 
-		/// <summary>
-		/// Overridable method for variant body parts to use for their non-systems based initialisation
-		/// </summary>
-		public virtual void Initialisation()
-		{
-		}
-
-		public virtual void ImplantUpdate()
+		public void ImplantUpdate()
 		{
 			foreach (BodyPart prop in ContainBodyParts)
 			{
@@ -250,7 +242,6 @@ namespace HealthV2
 		/// </summary>
 		public virtual void ImplantPeriodicUpdate()
 		{
-			//TODOH backwards for i
 			foreach (BodyPart prop in ContainBodyParts)
 			{
 				prop.ImplantPeriodicUpdate();
@@ -307,10 +298,10 @@ namespace HealthV2
 		/// Removes the Body Part Item from the storage of its parent (a body part container or another body part)
 		/// Will check if the this body part causes death upon removal and will tint it's Item Sprite to the character's skinTone if allowed.
 		/// </summary>
-		[ContextMenu("Debug - Drop this body part.")]
+		[ContextMenu("Debug - Drop this Body Part")]
 		public virtual void RemoveFromBodyThis()
 		{
-			BodyPartRemovalChecks();
+			if (BodyPartRemovalChecks() == false) return;
 			dynamic parent = this.GetParent();
 			if (parent != null)
 			{
@@ -320,9 +311,11 @@ namespace HealthV2
 
 
 		/// <summary>
-		/// Checks if a body part has a condition or state that applies logic upon removal then executes it.
+		/// Checks if it's possible to remove this body part and runs any logic
+		/// required upon it's removal.
 		/// </summary>
-		private void BodyPartRemovalChecks()
+		/// <returns>True if allowed to remove. Flase if gibbing.</returns>
+		private bool BodyPartRemovalChecks()
 		{
 			//Checks if the body part is not an internal organ and if that part shares a skin tone.
 			if(IsSurface && BodyPartItemInheritsSkinColor && currentBurnDamageLevel != BurnDamageLevels.CHARRED)
@@ -340,11 +333,17 @@ namespace HealthV2
 			{
 				StopExternalBleeding();
 			}
+			if (gibsEntireBodyOnRemoval)
+			{
+				healthMaster.Gib();
+				return false;
+			}
 			//If this body part is necessary for a character existence, kill them upon removal.
 			if(DeathOnRemoval)
 			{
 				healthMaster.Death();
 			}
+			return true;
 		}
 
 		/// <summary>
@@ -438,11 +437,19 @@ namespace HealthV2
 		/// </summary>
 		public virtual void SetUpSystems()
 		{
-			if (HealthMaster == null) return;
 			foreach (BodyPart prop in ContainBodyParts)
 			{
 				prop.SetUpSystems();
 			}
+
+			SetUpSystemsThis();
+		}
+
+
+		public void SetUpSystemsThis()
+		{
+			if (SystemSetup) return;
+			SystemSetup = true;
 			BloodInitialise();
 			foreach (var bodyPartModification in BodyPartModifications)
 			{
